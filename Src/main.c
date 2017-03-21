@@ -41,6 +41,8 @@
   ******************************************************************************
   */
 /* Includes ------------------------------------------------------------------*/
+#include <Inc/usbd_cdc_if.h>
+#include <stm32f3xx_hal_can.h>
 #include "main.h"
 #include "stm32f3xx_hal.h"
 #include "usb_device.h"
@@ -75,6 +77,7 @@ void sendCan();
 /* USER CODE BEGIN 0 */
 
 void HAL_CAN_RxCpltCallback(CAN_HandleTypeDef *CanHandle) {
+    CDC_Transmit_FS(CanHandle->pRxMsg->Data, (uint16_t) CanHandle->pRxMsg->DLC);
     HAL_StatusTypeDef receiveRes = HAL_CAN_Receive_IT(CanHandle, CAN_FIFO0);
     if (receiveRes == HAL_OK) {
         HAL_GPIO_TogglePin(GPIOE, LD10_Pin);
@@ -157,7 +160,7 @@ void SystemClock_Config(void)
 
     /**Initializes the CPU, AHB and APB busses clocks 
     */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -342,11 +345,11 @@ void sendCan() {
     hcan.pTxMsg->Data[0] = 'C';
     hcan.pTxMsg->Data[1] = 'A';
     hcan.pTxMsg->Data[2] = 'N';
-    hcan.pTxMsg->Data[3] = '1';
+    hcan.pTxMsg->Data[3] = (uint8_t) iPar;
     hcan.pTxMsg->Data[4] = ' ';
     hcan.pTxMsg->Data[5] = 'O';
     hcan.pTxMsg->Data[6] = 'K';
-    hcan.pTxMsg->Data[7] = '!';
+    hcan.pTxMsg->Data[7] = '\n';
     HAL_StatusTypeDef sendResult = HAL_CAN_Transmit(&hcan, 10);
     if (HAL_OK == sendResult) {
         HAL_GPIO_TogglePin(GPIOE, LD6_Pin);
