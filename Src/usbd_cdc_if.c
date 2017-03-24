@@ -53,40 +53,40 @@
 /** @defgroup USBD_CDC 
   * @brief usbd core module
   * @{
-  */ 
+  */
 
 /** @defgroup USBD_CDC_Private_TypesDefinitions
   * @{
-  */ 
+  */
 /* USER CODE BEGIN PRIVATE_TYPES */
-/* USER CODE END PRIVATE_TYPES */ 
+/* USER CODE END PRIVATE_TYPES */
 /**
   * @}
-  */ 
+  */
 
 /** @defgroup USBD_CDC_Private_Defines
   * @{
-  */ 
+  */
 /* USER CODE BEGIN PRIVATE_DEFINES */
 /* Define size for the receive and transmit buffer over CDC */
 /* It's up to user to redefine and/or remove those define */
-#define APP_RX_DATA_SIZE  4
-#define APP_TX_DATA_SIZE  4
+#define APP_RX_DATA_SIZE  1000
+#define APP_TX_DATA_SIZE  1000
 /* USER CODE END PRIVATE_DEFINES */
 /**
   * @}
-  */ 
+  */
 
 /** @defgroup USBD_CDC_Private_Macros
   * @{
-  */ 
+  */
 /* USER CODE BEGIN PRIVATE_MACRO */
 /* USER CODE END PRIVATE_MACRO */
 
 /**
   * @}
-  */ 
-  
+  */
+
 /** @defgroup USBD_CDC_Private_Variables
   * @{
   */
@@ -99,45 +99,102 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+uint32_t ptrWriteUserTxBufferFS = 0;
+uint32_t ptrReadUserTxBufferFS = 0;
+USBD_HandleTypeDef *hUsbDevice_0;
 /* USER CODE END PRIVATE_VARIABLES */
 
 /**
   * @}
-  */ 
-  
+  */
+
 /** @defgroup USBD_CDC_IF_Exported_Variables
   * @{
-  */ 
-  extern USBD_HandleTypeDef hUsbDeviceFS;
+  */
+extern USBD_HandleTypeDef hUsbDeviceFS;
 /* USER CODE BEGIN EXPORTED_VARIABLES */
+extern USBD_HandleTypeDef hUsbDeviceFS;
+
+extern uint8_t hexascii_to_halfbyte(uint8_t _ascii);
+
+extern CAN_HandleTypeDef hcan;
+extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern uint8_t interface_state;
+extern USBD_HandleTypeDef *hUsbDevice_0;
 /* USER CODE END EXPORTED_VARIABLES */
 
 /**
   * @}
-  */ 
-  
+  */
+
 /** @defgroup USBD_CDC_Private_FunctionPrototypes
   * @{
   */
-static int8_t CDC_Init_FS     (void);
-static int8_t CDC_DeInit_FS   (void);
-static int8_t CDC_Control_FS  (uint8_t cmd, uint8_t* pbuf, uint16_t length);
-static int8_t CDC_Receive_FS  (uint8_t* pbuf, uint32_t *Len);
+static int8_t CDC_Init_FS(void);
+
+static int8_t CDC_DeInit_FS(void);
+
+static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length);
+
+static int8_t CDC_Receive_FS(uint8_t *pbuf, uint32_t *Len);
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_DECLARATION */
+uint8_t CDC_add_buf_to_transmit(uint8_t *Buf, uint16_t Len) {
+    uint16_t _cnt = Len;
+
+    while (_cnt) {
+        UserTxBufferFS[ptrWriteUserTxBufferFS] = *Buf;
+        ptrWriteUserTxBufferFS++;
+        Buf++;
+        ptrWriteUserTxBufferFS %= APP_TX_DATA_SIZE;
+        _cnt--;
+    }
+    return (0);
+}
+
+uint8_t CDC_periodic_callback(void) {
+    uint32_t buffptr;
+    uint32_t buffsize;
+
+    if (ptrReadUserTxBufferFS != ptrWriteUserTxBufferFS) {
+        __disable_irq();
+        if (ptrReadUserTxBufferFS > ptrWriteUserTxBufferFS) /* Rollback */
+        {
+            buffsize = APP_TX_DATA_SIZE - ptrReadUserTxBufferFS;
+        } else {
+            buffsize = ptrWriteUserTxBufferFS - ptrReadUserTxBufferFS;
+        }
+        __enable_irq();
+
+        buffptr = ptrReadUserTxBufferFS;
+
+        if (interface_state != 1) return (1);
+
+        USBD_CDC_SetTxBuffer(hUsbDevice_0, (uint8_t *) &UserTxBufferFS[buffptr], buffsize);
+
+        if (USBD_CDC_TransmitPacket(hUsbDevice_0) == USBD_OK) {
+            ptrReadUserTxBufferFS += buffsize;
+            if (ptrReadUserTxBufferFS == APP_TX_DATA_SIZE) {
+                ptrReadUserTxBufferFS = 0;
+            }
+        }
+    }
+    return (0);
+}
 /* USER CODE END PRIVATE_FUNCTIONS_DECLARATION */
 
 /**
   * @}
-  */ 
-  
-USBD_CDC_ItfTypeDef USBD_Interface_fops_FS = 
-{
-  CDC_Init_FS,
-  CDC_DeInit_FS,
-  CDC_Control_FS,  
-  CDC_Receive_FS
-};
+  */
+
+USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
+        {
+                CDC_Init_FS,
+                CDC_DeInit_FS,
+                CDC_Control_FS,
+                CDC_Receive_FS
+        };
 
 /* Private functions ---------------------------------------------------------*/
 /**
@@ -146,14 +203,14 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
   * @param  None
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t CDC_Init_FS(void)
-{ 
-  /* USER CODE BEGIN 3 */ 
-  /* Set Application Buffers */
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
-  return (USBD_OK);
-  /* USER CODE END 3 */ 
+static int8_t CDC_Init_FS(void) {
+    /* USER CODE BEGIN 3 */
+    hUsbDevice_0 = &hUsbDeviceFS;
+    /* Set Application Buffers */
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
+    return (USBD_OK);
+    /* USER CODE END 3 */
 }
 
 /**
@@ -162,11 +219,10 @@ static int8_t CDC_Init_FS(void)
   * @param  None
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t CDC_DeInit_FS(void)
-{
-  /* USER CODE BEGIN 4 */ 
-  return (USBD_OK);
-  /* USER CODE END 4 */ 
+static int8_t CDC_DeInit_FS(void) {
+    /* USER CODE BEGIN 4 */
+    return (USBD_OK);
+    /* USER CODE END 4 */
 }
 
 /**
@@ -177,70 +233,68 @@ static int8_t CDC_DeInit_FS(void)
   * @param  length: Number of data to be sent (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t CDC_Control_FS  (uint8_t cmd, uint8_t* pbuf, uint16_t length)
-{ 
-  /* USER CODE BEGIN 5 */
-  switch (cmd)
-  {
-  case CDC_SEND_ENCAPSULATED_COMMAND:
- 
-    break;
+static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length) {
+    /* USER CODE BEGIN 5 */
+    switch (cmd) {
+        case CDC_SEND_ENCAPSULATED_COMMAND:
 
-  case CDC_GET_ENCAPSULATED_RESPONSE:
- 
-    break;
+            break;
 
-  case CDC_SET_COMM_FEATURE:
- 
-    break;
+        case CDC_GET_ENCAPSULATED_RESPONSE:
 
-  case CDC_GET_COMM_FEATURE:
+            break;
 
-    break;
+        case CDC_SET_COMM_FEATURE:
 
-  case CDC_CLEAR_COMM_FEATURE:
+            break;
 
-    break;
+        case CDC_GET_COMM_FEATURE:
 
-  /*******************************************************************************/
-  /* Line Coding Structure                                                       */
-  /*-----------------------------------------------------------------------------*/
-  /* Offset | Field       | Size | Value  | Description                          */
-  /* 0      | dwDTERate   |   4  | Number |Data terminal rate, in bits per second*/
-  /* 4      | bCharFormat |   1  | Number | Stop bits                            */
-  /*                                        0 - 1 Stop bit                       */
-  /*                                        1 - 1.5 Stop bits                    */
-  /*                                        2 - 2 Stop bits                      */
-  /* 5      | bParityType |  1   | Number | Parity                               */
-  /*                                        0 - None                             */
-  /*                                        1 - Odd                              */ 
-  /*                                        2 - Even                             */
-  /*                                        3 - Mark                             */
-  /*                                        4 - Space                            */
-  /* 6      | bDataBits  |   1   | Number Data bits (5, 6, 7, 8 or 16).          */
-  /*******************************************************************************/
-  case CDC_SET_LINE_CODING:   
-	
-    break;
+            break;
 
-  case CDC_GET_LINE_CODING:     
+        case CDC_CLEAR_COMM_FEATURE:
 
-    break;
+            break;
 
-  case CDC_SET_CONTROL_LINE_STATE:
+            /*******************************************************************************/
+            /* Line Coding Structure                                                       */
+            /*-----------------------------------------------------------------------------*/
+            /* Offset | Field       | Size | Value  | Description                          */
+            /* 0      | dwDTERate   |   4  | Number |Data terminal rate, in bits per second*/
+            /* 4      | bCharFormat |   1  | Number | Stop bits                            */
+            /*                                        0 - 1 Stop bit                       */
+            /*                                        1 - 1.5 Stop bits                    */
+            /*                                        2 - 2 Stop bits                      */
+            /* 5      | bParityType |  1   | Number | Parity                               */
+            /*                                        0 - None                             */
+            /*                                        1 - Odd                              */
+            /*                                        2 - Even                             */
+            /*                                        3 - Mark                             */
+            /*                                        4 - Space                            */
+            /* 6      | bDataBits  |   1   | Number Data bits (5, 6, 7, 8 or 16).          */
+            /*******************************************************************************/
+        case CDC_SET_LINE_CODING:
 
-    break;
+            break;
 
-  case CDC_SEND_BREAK:
- 
-    break;    
-    
-  default:
-    break;
-  }
+        case CDC_GET_LINE_CODING:
 
-  return (USBD_OK);
-  /* USER CODE END 5 */
+            break;
+
+        case CDC_SET_CONTROL_LINE_STATE:
+
+            break;
+
+        case CDC_SEND_BREAK:
+
+            break;
+
+        default:
+            break;
+    }
+
+    return (USBD_OK);
+    /* USER CODE END 5 */
 }
 
 /**
@@ -258,13 +312,82 @@ static int8_t CDC_Control_FS  (uint8_t cmd, uint8_t* pbuf, uint16_t length)
   * @param  Len: Number of data received (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-static int8_t CDC_Receive_FS (uint8_t* Buf, uint32_t *Len)
-{
-  /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-  return (USBD_OK);
-  /* USER CODE END 6 */ 
+static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
+    /* USER CODE BEGIN 6 */
+    uint32_t num_bytes;
+    uint8_t res;
+    uint8_t i;
+    uint8_t tmp_byte;
+
+    switch (Buf[0]) {
+        case 'V':
+            num_bytes = sprintf((char *) UserTxBufferFS, "V0101\r");
+            break;
+
+        case 'v':
+            num_bytes = sprintf((char *) UserTxBufferFS, "vSTM32\r");
+            break;
+
+        case 'O':
+            interface_state = 1;
+            break;
+
+        case 'C':
+            interface_state = 0;
+            break;
+
+        case 't':
+            i = 1;
+
+            hcan.pTxMsg->StdId = hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->StdId = (hcan.pTxMsg->StdId << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->StdId = (hcan.pTxMsg->StdId << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->DLC = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[0] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[1] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[2] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[3] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[4] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[5] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[6] = tmp_byte;
+            tmp_byte = hexascii_to_halfbyte(Buf[i++]);
+            tmp_byte = (tmp_byte << 4) + hexascii_to_halfbyte(Buf[i++]);
+            hcan.pTxMsg->Data[7] = tmp_byte;
+            HAL_CAN_Transmit(&hcan, 10);
+
+            num_bytes = sprintf((char *) UserTxBufferFS, "\r");
+            break;
+
+        default :
+            num_bytes = sprintf((char *) UserTxBufferFS, "\r");
+            break;
+    }
+
+    USBD_CDC_SetTxBuffer(hUsbDevice_0, (uint8_t *) &UserTxBufferFS[0], num_bytes);
+    res = USBD_CDC_TransmitPacket(hUsbDevice_0);
+
+
+//  CDC_Transmit_FS(Buf, *Len);
+
+    USBD_CDC_SetRxBuffer(hUsbDevice_0, &UserRxBufferFS[0]);
+    USBD_CDC_ReceivePacket(hUsbDevice_0);
+
+    return (USBD_OK);
+    /* USER CODE END 6 */
 }
 
 /**
@@ -278,18 +401,17 @@ static int8_t CDC_Receive_FS (uint8_t* Buf, uint32_t *Len)
   * @param  Len: Number of data to be send (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL or USBD_BUSY
   */
-uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
-{
-  uint8_t result = USBD_OK;
-  /* USER CODE BEGIN 7 */ 
-  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
-  if (hcdc->TxState != 0){
-    return USBD_BUSY;
-  }
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
-  result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
-  /* USER CODE END 7 */ 
-  return result;
+uint8_t CDC_Transmit_FS(uint8_t *Buf, uint16_t Len) {
+    uint8_t result = USBD_OK;
+    /* USER CODE BEGIN 7 */
+    USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *) hUsbDeviceFS.pClassData;
+    if (hcdc->TxState != 0) {
+        return USBD_BUSY;
+    }
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
+    result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+    /* USER CODE END 7 */
+    return result;
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
@@ -297,11 +419,11 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 
 /**
   * @}
-  */ 
+  */
 
 /**
   * @}
-  */ 
+  */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
 

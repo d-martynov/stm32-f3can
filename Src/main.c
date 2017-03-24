@@ -76,6 +76,12 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 void sendCan();
+
+extern uint8_t CDC_periodic_callback(void);
+
+extern uint8_t CDC_add_buf_to_transmit(uint8_t *Buf, uint16_t Len);
+
+uint8_t interface_state = 0;
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -125,21 +131,17 @@ void HAL_CAN_RxCpltCallback(CAN_HandleTypeDef *CanHandle) {
     buf[num_bytes++] = halfbyte_to_hexascii((time) >> 4);
     buf[num_bytes++] = halfbyte_to_hexascii((time) >> 0);
     buf[num_bytes++] = '\r';
-    CDC_Transmit_FS(buf, num_bytes);
+    if (interface_state == 1) CDC_add_buf_to_transmit(buf, num_bytes);
 
-    HAL_StatusTypeDef receiveRes = HAL_CAN_Receive_IT(CanHandle, CAN_FIFO0);
-    if (receiveRes == HAL_OK) {
-        HAL_GPIO_TogglePin(GPIOE, LD10_Pin);
-    } else {
-        HAL_GPIO_TogglePin(GPIOE, LD5_Pin);
-    }
+    HAL_CAN_Receive_IT(&hcan, CAN_FIFO0);
+
+
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     sendCan();
     HAL_GPIO_TogglePin(GPIOE, LD3_Pin);
 }
-
 
 
 /* USER CODE END 0 */
@@ -191,8 +193,8 @@ int main(void) {
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
     while (1) {
+        CDC_periodic_callback();
         /* USER CODE END WHILE */
-
         /* USER CODE BEGIN 3 */
     }
     /* USER CODE END 3 */
